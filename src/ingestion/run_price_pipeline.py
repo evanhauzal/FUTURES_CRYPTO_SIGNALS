@@ -33,17 +33,22 @@ def append_price_to_local_csv(data_dir: str, token: str, price: float):
 
 def start_price_pipeline():
     print("\n" + "="*60)
-    print("[*] BACKEND PIPELINE: FULL EXPERIMENT (LIVE DATA + RETRAIN + SCANNER)")
+    print("[*] BACKEND PIPELINE: FULL EXPERIMENT (LIVE DATA + RETRAIN + SCANNER + REAL NEWS)")
     print("="*60)
     
     scanner = TradingSignalCenter()
     tokens = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD"]
     
+    # Menjaga memori judul berita yang sudah dikirim ke Telegram agar tidak duplikat
+    sent_news_titles = set()
+    
     try:
         while True:
             print(f"\n[*] Siklus eksperimen penuh dimulai pada: {time.strftime('%Y-%m-%d %H:%M:%S')}")
             
+            # -----------------------------------------------------------------
             # STEP 1: Ambil data harga live dari yfinance dan perbarui file lokal
+            # -----------------------------------------------------------------
             print("\n[STEP 1] Menyinkronkan data live ke file CSV lokal...")
             for ticker in tokens:
                 try:
@@ -61,7 +66,37 @@ def start_price_pipeline():
                 except Exception as e:
                     print(f"   [!] Gagal sinkronisasi data {ticker}: {str(e)}")
             
+            # -----------------------------------------------------------------
+            # STEP 1B: Memeriksa dan mengirimkan berita pasar kripto dari DATABASE ASLI
+            # -----------------------------------------------------------------
+            print("\n[STEP 1B] Memeriksa Berita Pasar Kripto Terbaru dari Database...")
+            try:
+                # Mengambil berita paling baru dari tabel v_market_news via DB connector
+                news_data = scanner.db.get_latest_market_news(limit=1)
+                
+                if news_data:
+                    # Jalankan pengecekan memori pencegah duplikasi otomatis
+                    if news_data["title"] not in sent_news_titles:
+                        scanner.send_news_notification(
+                            title=news_data["title"],
+                            source=news_data["source"],
+                            url=news_data["url"],
+                            sentiment=news_data["sentiment"]
+                        )
+                        # Masukkan judul ke dalam cache memori agar tidak di-spam di siklus berikutnya
+                        sent_news_titles.add(news_data["title"])
+                        print(f"   [+] Berita riil baru dari DB berhasil dikirim ke grup Telegram.")
+                    else:
+                        print(f"   [-] Berita asli di DB tidak berubah. Lewati untuk mencegah spam.")
+                else:
+                    print("   [-] Tabel berita di database kosong atau tidak ditemukan data.")
+                        
+            except Exception as e:
+                print(f"   [!] Gagal memproses atau mengirim data berita asli: {str(e)}")
+            
+            # -----------------------------------------------------------------
             # STEP 2: JALANKAN PROSES TRAINING ULANG MODEL (EKSPERIMEN BARU)
+            # -----------------------------------------------------------------
             print("\n[STEP 2] Menjalankan Re-Training Model XGBoost (Membaca ulang puluhan ribu baris)...")
             try:
                 subprocess.run(
@@ -72,7 +107,9 @@ def start_price_pipeline():
             except Exception as e:
                 print(f"[!] Gagal melakukan training ulang model: {str(e)}")
             
-            # STEP 3: Panggil model yang baru dilatih untuk scan sinyal dan tembak ke DB
+            # -----------------------------------------------------------------
+            # STEP 3: Panggil model yang baru dilatih untuk scan sinyal dan tembak ke DB & Telegram
+            # -----------------------------------------------------------------
             print("\n[STEP 3] Mengeksekusi Scanner untuk mengevaluasi sinyal baru ke Database...")
             try:
                 scanner.scan_market_for_signals()

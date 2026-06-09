@@ -1,5 +1,9 @@
+# src/ingestion/save_to_db.py
+import os
 import psycopg2
 from datetime import datetime
+# Mengimpor modul analisis sentimen mandiri dari folder models yang sudah dibuat
+from src.models.sentiment_model import CryptoSentimentAnalyzer
 
 class TradingDatabaseConnector:
     def __init__(self):
@@ -7,7 +11,10 @@ class TradingDatabaseConnector:
         self.host = "localhost"
         self.database = "rosbd_trading_db"
         self.user = "postgres"
-        self.password = "Naya110212" # <-- Ganti dengan password Anda
+        self.password = "Naya110212"
+
+        # Inisialisasi objek analyzer dari file terpisah agar kode tetap modular
+        self.analyzer = CryptoSentimentAnalyzer()
 
     def _get_connection(self):
         return psycopg2.connect(
@@ -38,13 +45,15 @@ class TradingDatabaseConnector:
 
     def insert_market_news(self, source_name: str, title: str, description: str, url: str, published_at: str):
         """
-        Memasukkan data teks berita global ke tabel v_market_news
+        Memasukkan data teks berita global sekaligus label sentimennya ke tabel v_market_news
         """
         # Cek duplikasi judul berita agar database tidak penuh dengan berita yang sama
         check_query = "SELECT id FROM v_market_news WHERE title = %s;"
+        
+        # PERUBAHAN: Menambahkan kolom sentiment ke dalam target insert kueri SQL
         insert_query = """
-            INSERT INTO v_market_news (source_name, title, description, url, published_at)
-            VALUES (%s, %s, %s, %s, %s);
+            INSERT INTO v_market_news (source_name, title, description, url, published_at, sentiment)
+            VALUES (%s, %s, %s, %s, %s, %s);
         """
         try:
             conn = self._get_connection()
@@ -63,25 +72,60 @@ class TradingDatabaseConnector:
             except:
                 clean_date = datetime.now()
 
-            cursor.execute(insert_query, (source_name, title, description, url, clean_date))
+            # PERUBAHAN: Memanggil fungsi analisis sentimen dari objek model luar secara otomatis sebelum disimpan
+            sentiment_label = self.analyzer.calculate_sentiment_label(title, description)
+
+            # PERUBAHAN: Menyertakan sentiment_label ke dalam tuple eksekusi kueri
+            cursor.execute(insert_query, (source_name, title, description, url, clean_date, sentiment_label))
             conn.commit()
             cursor.close()
             conn.close()
-            print(f"[DB SUCCESS] Berhasil menyimpan berita baru: {title[:40]}...")
+            print(f"[DB SUCCESS] Berhasil menyimpan berita baru [{sentiment_label}]: {title[:40]}...")
         except Exception as e:
             print(f"[DB ERROR] Gagal menyimpan data berita: {str(e)}")
+
+    def get_latest_market_news(self, limit: int = 1):
+        """
+        Mengambil berita kripto paling baru dari tabel v_market_news beserta kolom sentimen aslinya
+        """
+        # PERUBAHAN: Menarik kolom sentiment asli dari database untuk diteruskan ke bot Telegram
+        query = """
+            SELECT source_name, title, description, url, sentiment 
+            FROM v_market_news 
+            ORDER BY id DESC LIMIT %s;
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, (limit,))
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if row:
+                return {
+                    "source": row[0],
+                    "title": row[1],
+                    "description": row[2],
+                    "url": row[3],
+                    "sentiment": row[4] if row[4] else "NEUTRAL" # Menggunakan data kolom riil database
+                }
+            return None
+        except Exception as e:
+            print(f"[DB ERROR] Gagal mengambil berita terbaru: {str(e)}")
+            return None
 
 # =========================================================================
 # JALUR TESTING KONEKSI LOKAL
 # =========================================================================
 if __name__ == "__main__":
-    print("[*] Menguji coba koneksi dan fungsionalitas insert PostgreSQL...")
+    print("[*] Menguji coba koneksi dan fungsionalitas insert PostgreSQL dengan Sentimen Otomatis...")
     db = TradingDatabaseConnector()
     
     # Uji coba input data harga tiruan
     db.insert_crypto_signal(token="BTC", price=62190.50, probability=55.4, status="LONG", tp=64055.0, sl=61443.0)
     
-    # Uji coba input data berita tiruan
+    # Uji coba input data berita tiruan (Sistem akan otomatis memberikan label lewat model eksternal)
     db.insert_market_news(
         source_name="Test Source", 
         title="Uji Coba Koneksi Sistem Database Terdistribusi ROSBD", 

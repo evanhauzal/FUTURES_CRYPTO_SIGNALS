@@ -63,13 +63,41 @@ with col_news:
     
     try:
         conn = get_db_connection()
-        query_news = "SELECT source_name, title, description, url, published_at FROM v_market_news ORDER BY created_at DESC LIMIT 10;"
+        # PERUBAHAN: Menambahkan kolom 'sentiment' ke dalam SELECT query
+        query_news = "SELECT source_name, title, description, url, published_at, sentiment FROM v_market_news ORDER BY created_at DESC LIMIT 10;"
         df_news = pd.read_sql(query_news, conn)
         conn.close()
         
         if not df_news.empty:
+            # FITUR TAMBAHAN: Menampilkan rangkuman persentase sentimen saat ini di bagian atas kolom berita
+            sentiment_counts = df_news['sentiment'].value_counts()
+            pos_count = sentiment_counts.get('POSITIVE', 0)
+            neg_count = sentiment_counts.get('NEGATIVE', 0)
+            neu_count = sentiment_counts.get('NEUTRAL', 0)
+            
+            s_col1, s_col2, s_col3 = st.columns(3)
+            s_col1.metric("🟢 Positive News", f"{pos_count} Berita")
+            s_col2.metric("🔴 Negative News", f"{neg_count} Berita")
+            s_col3.metric("⚪ Neutral News", f"{neu_count} Berita")
+            st.write("---")
+
             for idx, row in df_news.iterrows():
-                with st.expander(f"{idx+1}. [{row['source_name']}] - {row['title'][:60]}..."):
+                # PERUBAHAN: Mapping emoji dan warna berdasarkan data label sentimen riil dari database
+                sentiment_label = row['sentiment'] if row['sentiment'] else "NEUTRAL"
+                
+                if sentiment_label == "POSITIVE":
+                    emoji = "🟢"
+                    color_tag = ":green[POSITIVE]"
+                elif sentiment_label == "NEGATIVE":
+                    emoji = "🔴"
+                    color_tag = ":red[NEGATIVE]"
+                else:
+                    emoji = "⚪"
+                    color_tag = ":gray[NEUTRAL]"
+                
+                # Menampilkan ekspander berita dengan indikator emoji sentimen di judulnya
+                with st.expander(f"{emoji} {idx+1}. [{row['source_name']}] - {row['title'][:55]}..."):
+                    st.markdown(f"**Analisis Sentimen:** {color_tag}")
                     st.markdown(f"**Waktu Publikasi:** `{row['published_at']}`")
                     st.write(row['description'])
                     st.markdown(f"[Baca Berita Selengkapnya]({row['url']})")

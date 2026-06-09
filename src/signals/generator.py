@@ -1,28 +1,27 @@
 import os
+import requests
 import pandas as pd
 from datetime import datetime
 from src.features.feature_engineering import CryptoFeatureEngineer
 from src.models.predict_linear import CryptoInferenceEngine
-# Tambahkan import konektor database kelompok Anda di sini
 from src.ingestion.save_to_db import TradingDatabaseConnector
 
 class TradingSignalCenter:
     def __init__(self, model_dir: str = "MODEL"):
+        # Path direktori data lokal sesuai dengan konfigurasi proyek Anda
         self.data_dir = r"C:\Users\hp\Documents\PROJECT ROSBD\TOOLS-TRADING-ROSBD\DATA"
         self.engineer = CryptoFeatureEngineer(data_dir=self.data_dir)
         self.inference = CryptoInferenceEngine(model_dir=model_dir)
-        
-        # Inisialisasi konektor database terpusat
         self.db = TradingDatabaseConnector()
 
-        self.confidence_thresholds = {
-            "BTC": 0.51, 
-            "BNB": 0.51, 
-            "ETH": 0.52, 
-            "XRP": 0.52, 
-            "SOL": 0.53
-        }
+        # Kredensial Bot Telegram resmi berdasarkan token BotFather dan ID Grup Anda
+        self.telegram_token = "8801567080:AAE5Gh0-XhCvYNlLv-6tvpcOAZYJ6TBsw40"  # Sempurnakan token lengkap Anda di sini
+        self.telegram_chat_id = "-5267717165"
 
+        # Threshold probabilitas minimal hasil prediksi model XGBoost untuk memicu sinyal
+        self.confidence_thresholds = {"BTC": 0.51, "BNB": 0.51, "ETH": 0.52, "XRP": 0.52, "SOL": 0.53}
+        
+        # Parameter manajemen risiko kelompok (Take Profit dan Stop Loss)
         self.risk_parameters = {
             "BTC": {"TP": 0.030, "SL": 0.012},
             "BNB": {"TP": 0.030, "SL": 0.012},
@@ -31,7 +30,75 @@ class TradingSignalCenter:
             "XRP": {"TP": 0.050, "SL": 0.020}
         }
 
+    def send_telegram_notification(self, token: str, price: float, prob: float, tp: float, sl: float, time_str: str):
+        """Mengirimkan alert sinyal trading hasil prediksi model ML ke grup Telegram"""
+        url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+        
+        message = (
+            f"🔔 *ROB-SBD TRADING SIGNAL DETECTED* 🔔\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🪙 *Token:* {token}/USDT\n"
+            f"📈 *Signal:* EXECUTE LONG\n"
+            f"💵 *Entry Price:* ${price:.4f}\n"
+            f"🎯 *Take Profit (TP):* ${tp:.4f} (+{self.risk_parameters[token]['TP']*100:.1f}%)\n"
+            f"🛑 *Stop Loss (SL):* ${sl:.4f} (-{self.risk_parameters[token]['SL']*100:.1f}%)\n"
+            f"📊 *AI Probability:* {prob*100:.2f}%\n"
+            f"⏰ *Timestamp:* {time_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 *Sent automatically by XGBoost Inference Engine*"
+        )
+        
+        payload = {
+            "chat_id": self.telegram_chat_id,
+            "text": message,
+            "parse_mode": "Markdown"
+        }
+        
+        try:
+            response = requests.post(url, json=payload)
+            if response.status_code == 200:
+                print(f"   [TELEGRAM SUCCESS] Notifikasi sinyal {token} berhasil terkirim ke grup.")
+            else:
+                print(f"   [TELEGRAM ERROR] Gagal mengirim sinyal ke grup: {response.text}")
+        except Exception as e:
+            print(f"   [TELEGRAM ERROR] Gangguan koneksi API Telegram pada modul sinyal: {str(e)}")
+
+    def send_news_notification(self, title: str, source: str, url: str, sentiment: str = "NEUTRAL"):
+        """Mengirimkan ringkasan berita fundamental pasar kripto ke grup Telegram menggunakan mode HTML"""
+        telegram_url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+        
+        emoji_map = {"BULLISH": "🚀🟢", "BEARISH": "🚨🔴", "NEUTRAL": "📰🔵"}
+        emoji = emoji_map.get(sentiment.upper(), "📰🔵")
+        
+        # Menggunakan tag HTML (<b> dan <i>) menggantikan Markdown agar tidak mudah error karena tanda baca berita
+        message = (
+            f"{emoji} <b>CRYPTO NEWS UPDATE</b> {emoji}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📰 <b>Judul:</b> {title}\n\n"
+            f"🔍 <b>Sumber:</b> {source}\n"
+            f"🔗 <b>Baca Selengkapnya:</b> <a href='{url}'>Klik Di Sini</a>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 <i>Sent automatically by ROB-SBD News Ingestion System</i>"
+        )
+        
+        payload = {
+            "chat_id": self.telegram_chat_id,
+            "text": message,
+            "parse_mode": "HTML",  # Diubah ke HTML agar aman dari error parse character
+            "disable_web_page_preview": False
+        }
+        
+        try:
+            res = requests.post(telegram_url, json=payload)
+            if res.status_code == 200:
+                print(f"   [TELEGRAM NEWS] Berhasil meneruskan berita ke grup Telegram.")
+            else:
+                print(f"   [TELEGRAM NEWS ERROR] Gagal meneruskan berita: {res.text}")
+        except Exception as e:
+            print(f"   [TELEGRAM NEWS ERROR] Gangguan koneksi API Telegram pada modul berita: {str(e)}")
+
     def scan_market_for_signals(self):
+        """Membaca data historis lokal, mengekstrak fitur, memprediksi arah, dan memperbarui DB"""
         file_paths = {
             "BTC": os.path.join(self.data_dir, "BTC_1h.csv"),
             "ETH": os.path.join(self.data_dir, "ETH_1h.csv"),
@@ -46,60 +113,59 @@ class TradingSignalCenter:
 
         for token, file_path in file_paths.items():
             if not os.path.exists(file_path):
-                print(f"[!] Berkas transaksi {token} tidak ditemukan di {file_path}")
+                print(f"[!] Berkas data untuk {token} tidak ditemukan di folder DATA.")
                 continue
                 
             df_raw = pd.read_csv(file_path, low_memory=False)
             df_features = self.engineer.build_features(df_raw, token, is_training=False)
             
             if df_features.empty:
-                print(f"[!] Data fitur untuk {token} kosong setelah pembersihan.")
                 continue
                 
             latest_row = df_features.iloc[-1]
             current_price = float(latest_row["Close"])
             current_time = latest_row["Datetime"]
             
-            prob_raw = self.inference.predict_next_probability(df_features, token)
-            prob = float(prob_raw)
+            prob = float(self.inference.predict_next_probability(df_features, token))
             threshold = self.confidence_thresholds.get(token, 0.52)
             
             print(f"[{token}] Price: ${current_price:<10} | Prob: {prob*100:.2f}% | Threshold: {threshold*100:.1f}%")
             
-            # Ambil parameter manajemen risiko
             risk = self.risk_parameters[token]
             
-            # Logika evaluasi kondisi pasar berdasarkan Model XGBoost
             if prob >= threshold:
                 status = "LONG"
                 tp_price = current_price * (1 + risk["TP"])
                 sl_price = current_price * (1 - risk["SL"])
                 
                 print(f"   [!!!] SIGNAL DETECTED - EXECUTE LONG {token} [!!!]")
-                print(f"         Execution Entry : ${current_price:.4f}")
-                print(f"         Take Profit (TP): ${tp_price:.4f} (+{risk['TP']*100}%)")
-                print(f"         Stop Loss (SL)  : ${sl_price:.4f} (-{risk['SL']*100}%)")
-                print(f"         Data Timestamp  : {current_time}")
-                print("-" * 40)
+                
+                # Kirim sinyal otomatis ke grup Telegram
+                self.send_telegram_notification(
+                    token=token,
+                    price=current_price,
+                    prob=prob,
+                    tp=tp_price,
+                    sl=sl_price,
+                    time_str=str(current_time)
+                )
             else:
                 status = "Wait & See"
                 tp_price = None
                 sl_price = None
             
-            # KUNCI UTAMA: Tembak hasil kalkulasi asli XGBoost ke PostgreSQL agar masuk ke Streamlit
             try:
                 self.db.insert_crypto_signal(
                     token=token,
                     price=current_price,
-                    probability=round(prob * 100, 2), # Ubah desimal ke persentase (misal 57.39)
+                    probability=round(prob * 100, 2),
                     status=status,
                     tp=tp_price,
                     sl=sl_price
                 )
             except Exception as e:
-                print(f"[!] Gagal menyimpan sinyal XGBoost {token} ke DB: {str(e)}")
+                print(f"[!] Gagal menyimpan entri sinyal {token} ke database PostgreSQL: {str(e)}")
 
-# Tambahkan fungsi pembantu agar bisa dipanggil secara modular oleh file lain
 def run_signal_scanner():
     center = TradingSignalCenter()
     center.scan_market_for_signals()
