@@ -2,10 +2,11 @@ import os
 import joblib
 import pandas as pd
 import numpy as np
+import xgboost as xgb
 
 class CryptoInferenceEngine:
     def __init__(self, model_dir: str = "MODEL"):
-        # Mengunci direktori tempat penyimpanan model XGBoost (.pkl)
+        # Mengunci direktori tempat penyimpanan model XGBoost Booster
         self.model_dir = model_dir
         self.models = {}
         self.feature_columns = []
@@ -30,9 +31,11 @@ class CryptoInferenceEngine:
     def load_all_trained_models(self):
         tokens = ["BTC", "ETH", "SOL", "XRP", "BNB"]
         for token in tokens:
-            model_path = os.path.join(self.model_dir, f"{token.lower()}_xgb_model.pkl")
+            model_path = os.path.join(self.model_dir, f"{token.lower()}_xgb_model.json")
             if os.path.exists(model_path):
-                self.models[token] = joblib.load(model_path)
+                booster = xgb.Booster()
+                booster.load_model(model_path)
+                self.models[token] = booster
             else:
                 self.models[token] = None
 
@@ -44,9 +47,8 @@ class CryptoInferenceEngine:
         try:
             # Ambil fitur yang sesuai dengan kebutuhan kolom model
             latest_data = df_features[self.feature_columns].tail(1)
-            
-            # Hitung nilai prediksi probabilitas
-            prob_breakout = model.predict_proba(latest_data)[0][1]
+            dmatrix = xgb.DMatrix(latest_data.values, feature_names=self.feature_columns)
+            prob_breakout = model.predict(dmatrix)[0]
             return float(prob_breakout)
             
         except Exception as e:

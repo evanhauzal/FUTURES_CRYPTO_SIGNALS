@@ -1,0 +1,12 @@
+python-dotenv
+joblib
+nltk
+numpy
+pandas
+psycopg2-binary
+requests
+scikit-learn
+streamlit
+xgboost
+pyspark==3.5.6
+yfinance

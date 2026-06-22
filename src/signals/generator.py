@@ -2,14 +2,16 @@ import os
 import requests
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 from src.features.feature_engineering import CryptoFeatureEngineer
 from src.models.predict_linear import CryptoInferenceEngine
 from src.ingestion.save_to_db import TradingDatabaseConnector
 
 class TradingSignalCenter:
     def __init__(self, model_dir: str = "MODEL"):
-        # Path direktori data lokal sesuai dengan konfigurasi proyek Anda
-        self.data_dir = r"C:\Users\hp\Documents\PROJECT ROSBD\TOOLS-TRADING-ROSBD\DATA"
+        # Path direktori data lokal proyek ini, relatif ke root workspace
+        self.data_dir = str(Path(__file__).resolve().parents[2] / "DATA")
+        os.makedirs(self.data_dir, exist_ok=True)
         self.engineer = CryptoFeatureEngineer(data_dir=self.data_dir)
         self.inference = CryptoInferenceEngine(model_dir=model_dir)
         self.db = TradingDatabaseConnector()

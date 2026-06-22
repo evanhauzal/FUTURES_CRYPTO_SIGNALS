@@ -1,18 +1,20 @@
 import os
 import pandas as pd
 from datetime import datetime, timedelta
+from pathlib import Path
 from src.ingestion.yahoo_loader import YahooDataLoader
 
 def sync_all_tokens():
     loader = YahooDataLoader()
     
-    # Menambahkan huruf 'r' di depan string agar backslash Windows tidak error
+    data_dir = Path(__file__).resolve().parents[2] / "DATA"
+    os.makedirs(data_dir, exist_ok=True)
     file_paths = {
-        "BTC": r"C:\Users\hp\Documents\PROJECT ROSBD\TOOLS-TRADING-ROSBD\DATA\BTC_1h.csv",
-        "ETH": r"C:\Users\hp\Documents\PROJECT ROSBD\TOOLS-TRADING-ROSBD\DATA\ETH_1h.csv",
-        "SOL": r"C:\Users\hp\Documents\PROJECT ROSBD\TOOLS-TRADING-ROSBD\DATA\SOL_1h.csv",
-        "XRP": r"C:\Users\hp\Documents\PROJECT ROSBD\TOOLS-TRADING-ROSBD\DATA\XRP_1h.csv",
-        "BNB": r"C:\Users\hp\Documents\PROJECT ROSBD\TOOLS-TRADING-ROSBD\DATA\BNB_1h.csv"
+        "BTC": data_dir / "BTC_1h.csv",
+        "ETH": data_dir / "ETH_1h.csv",
+        "SOL": data_dir / "SOL_1h.csv",
+        "XRP": data_dir / "XRP_1h.csv",
+        "BNB": data_dir / "BNB_1h.csv"
     }
     
     print("\n" + "="*50)
