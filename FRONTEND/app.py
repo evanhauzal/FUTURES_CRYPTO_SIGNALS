@@ -2,15 +2,25 @@ import streamlit as st
 import psycopg2
 import pandas as pd
 import time
+import sys
+from pathlib import Path
+
+# Add project root to sys.path to allow config import regardless of execution directory
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
 
 st.set_page_config(page_title="ROSBD Operational Trading & Sentiment Dashboard", layout="wide")
 
+from config.settings import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+
 def get_db_connection():
     return psycopg2.connect(
-        host="localhost",
-        database="rosbd_trading_db",  
-        user="postgres",
-        password="Naya110212"  
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
     )
 
 st.title("📈 ROSBD Operational Trading & Sentiment Dashboard")

@@ -7,14 +7,18 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(Path(".env"))
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # ─── PostgreSQL connection ─────────────────────────────────────────────────────
-DB_HOST     = os.getenv("DB_HOST",     "localhost")
+DB_HOST     = os.getenv("DB_HOST",     "db.qlpnwsbalsjduxwdvddh.supabase.co")
 DB_PORT     = int(os.getenv("DB_PORT", "5432"))
-DB_NAME     = os.getenv("DB_NAME",     "trading_db")
+DB_NAME     = os.getenv("DB_NAME",     "postgres")
 DB_USER     = os.getenv("DB_USER",     "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "Naya110212")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "YgwZDZtlHDVdBU67")
+
+# ─── Supabase settings ─────────────────────────────────────────────────────────
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://qlpnwsbalsjduxwdvddh.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_DzzBzPFtQ3crOHW3am8m0Q_yzov_JQA")
 
 # ─── Pipeline parameters ───────────────────────────────────────────────────────
 WINDOW_SIZE     = int(os.getenv("WINDOW_SIZE",     "20"))   # trades per window

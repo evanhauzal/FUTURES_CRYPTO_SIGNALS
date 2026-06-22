@@ -4,14 +4,16 @@ import psycopg2
 from datetime import datetime
 # Mengimpor modul analisis sentimen mandiri dari folder models yang sudah dibuat
 from src.models.sentiment_model import CryptoSentimentAnalyzer
+from config.settings import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 
 class TradingDatabaseConnector:
     def __init__(self):
-        # Konfigurasi kredensial PostgreSQL lokal di laptop Anda
-        self.host = "localhost"
-        self.database = "rosbd_trading_db"
-        self.user = "postgres"
-        self.password = "Naya110212"
+        # Konfigurasi kredensial PostgreSQL Supabase
+        self.host = DB_HOST
+        self.port = DB_PORT
+        self.database = DB_NAME
+        self.user = DB_USER
+        self.password = DB_PASSWORD
 
         # Inisialisasi objek analyzer dari file terpisah agar kode tetap modular
         self.analyzer = CryptoSentimentAnalyzer()
@@ -19,6 +21,7 @@ class TradingDatabaseConnector:
     def _get_connection(self):
         return psycopg2.connect(
             host=self.host,
+            port=self.port,
             database=self.database,
             user=self.user,
             password=self.password
