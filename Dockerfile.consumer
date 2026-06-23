@@ -1,0 +1,22 @@
+# Dockerfile untuk Kafka Consumer service
+# Service ini berjalan terus-menerus (long-running) untuk
+# mendengarkan topik Kafka dan menyimpan data ke Cassandra.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir \
+    kafka-python==2.0.2 \
+    cassandra-driver==3.29.2
+
+# Copy source code consumer
+COPY src/storage/kafka_to_cassandra.py /app/src/storage/kafka_to_cassandra.py
+
+# Buat __init__.py agar Python mengenali package
+RUN mkdir -p /app/src/storage && \
+    touch /app/src/__init__.py && \
+    touch /app/src/storage/__init__.py
+
+CMD ["python", "-m", "src.storage.kafka_to_cassandra"]

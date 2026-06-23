@@ -1,6 +1,23 @@
-version: '3.8'
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.5-python3.11
+  env_file:
+    - .env.airflow
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./src:/opt/airflow/src
+    - ./MODEL:/opt/airflow/MODEL
+    - ./DATA:/opt/airflow/DATA
+    - ./config:/opt/airflow/config
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
 
 services:
+  # ============================================================
+  # ZOOKEEPER — Koordinator Kafka Cluster
+  # ============================================================
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: crypto_zookeeper
@@ -10,6 +27,9 @@ services:
     ports:
       - "2181:2181"
 
+  # ============================================================
+  # KAFKA — Message Broker untuk streaming data OHLCV
+  # ============================================================
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: crypto_kafka
@@ -26,6 +46,9 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
+  # ============================================================
+  # CASSANDRA — Database NoSQL untuk penyimpanan data OHLCV
+  # ============================================================
   cassandra:
     image: cassandra:4.1
     container_name: crypto_cassandra
@@ -36,5 +59,98 @@ services:
     volumes:
       - cassandra_data:/var/lib/cassandra
 
+  # ============================================================
+  # KAFKA CONSUMER — Service yang selalu hidup (standby)
+  # Mendengarkan topik Kafka dan menyimpan data ke Cassandra
+  # ============================================================
+  kafka-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: crypto_kafka_consumer
+    depends_on:
+      - kafka
+      - cassandra
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_PORT: 9042
+    restart: always
+
+  # ============================================================
+  # POSTGRESQL AIRFLOW — Metadata store internal Airflow
+  # (BUKAN database Supabase Anda)
+  # ============================================================
+  postgres-airflow:
+    image: postgres:15
+    container_name: crypto_postgres_airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # AIRFLOW INIT — One-time setup (migrasi DB + create admin user)
+  # ============================================================
+  airflow-init:
+    <<: *airflow-common
+    container_name: crypto_airflow_init
+    entrypoint: /bin/bash
+    command: >
+      -c "
+        airflow db migrate &&
+        airflow users create
+          --username admin
+          --password admin
+          --firstname Admin
+          --lastname User
+          --role Admin
+          --email admin@example.com || true
+      "
+    restart: "no"
+
+  # ============================================================
+  # AIRFLOW WEBSERVER — Web UI Monitoring (port 8080)
+  # Login: admin / admin
+  # ============================================================
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: crypto_airflow_webserver
+    command: airflow webserver --port 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
+  # AIRFLOW SCHEDULER — Menjalankan DAG sesuai jadwal
+  # ============================================================
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: crypto_airflow_scheduler
+    command: airflow scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: always
+
 volumes:
   cassandra_data:
+  postgres_airflow_data:
+  airflow_logs:
