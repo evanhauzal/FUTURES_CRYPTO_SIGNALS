@@ -45,12 +45,11 @@ with DAG(
     # ----------------------------------------------------------
     kafka_producer_task = BashOperator(
         task_id="kafka_producer",
-        bash_command="cd /opt/airflow && python -m src.ingestion.kafka_producer",
-        env={
-            "KAFKA_BOOTSTRAP_SERVERS": "{{ var.value.get('kafka_servers', 'kafka:29092') }}",
-            "CASSANDRA_HOST": "{{ var.value.get('cassandra_host', 'cassandra') }}",
-            "CASSANDRA_PORT": "{{ var.value.get('cassandra_port', '9042') }}",
-        },
+        bash_command="""
+            export CASSANDRA_HOST=cassandra
+            export CASSANDRA_PORT=9042
+            cd /opt/airflow && python -m src.ingestion.kafka_producer
+        """,
     )
 
     # ----------------------------------------------------------
@@ -71,11 +70,12 @@ with DAG(
     # ----------------------------------------------------------
     train_model_task = BashOperator(
         task_id="train_model",
-        bash_command="cd /opt/airflow && python -m src.models.train_model",
-        env={
-            "CASSANDRA_HOST": "{{ var.value.get('cassandra_host', 'cassandra') }}",
-            "CASSANDRA_PORT": "{{ var.value.get('cassandra_port', '9042') }}",
-        },
+        bash_command="""
+            export CASSANDRA_HOST=cassandra
+            export CASSANDRA_PORT=9042
+            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+            cd /opt/airflow && python -m src.models.train_model
+        """,
         # Training bisa memakan waktu lama
         execution_timeout=timedelta(minutes=30),
     )
@@ -88,11 +88,11 @@ with DAG(
     # ----------------------------------------------------------
     scan_signals_task = BashOperator(
         task_id="scan_signals",
-        bash_command="cd /opt/airflow && python -m src.signals.generator",
-        env={
-            "CASSANDRA_HOST": "{{ var.value.get('cassandra_host', 'cassandra') }}",
-            "CASSANDRA_PORT": "{{ var.value.get('cassandra_port', '9042') }}",
-        },
+        bash_command="""
+            export CASSANDRA_HOST=cassandra
+            export CASSANDRA_PORT=9042
+            cd /opt/airflow && python -m src.signals.generator
+        """,
     )
 
     # ----------------------------------------------------------

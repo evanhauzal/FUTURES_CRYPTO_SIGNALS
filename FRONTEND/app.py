@@ -13,6 +13,20 @@ if str(project_root) not in sys.path:
 st.set_page_config(page_title="ROSBD Operational Trading & Sentiment Dashboard", layout="wide")
 
 from config.settings import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+import yfinance as yf
+
+# Fungsi untuk mengambil harga real-time (Aman dari Blokir ISP & Rate Limit)
+@st.cache_data(ttl=2) # Cache 2 detik agar super responsif
+def get_realtime_price(token):
+    # Hapus spasi siluman yang terikut dari PostgreSQL CHAR data type
+    clean_token = str(token).strip().upper()
+    
+    try:
+        ticker = yf.Ticker(f"{clean_token}-USD")
+        return float(ticker.fast_info['lastPrice'])
+    except Exception as e:
+        print(f"YFinance Error for {clean_token}: {str(e)}")
+        return None
 
 def get_db_connection():
     return psycopg2.connect(
@@ -50,9 +64,16 @@ with col_market:
                 with st.container():
                     c1, c2 = st.columns([2, 1])
                     with c1:
+                        # Ambil harga real-time terbaru
+                        live_price = get_realtime_price(row['token'])
+                        
+                        # Fallback ke harga database jika Yahoo Finance gagal
+                        display_price = live_price if live_price is not None else float(row['price'])
+                        price_source = "🔴 Live Market" if live_price is not None else "⚪ Database"
+                        
                         st.metric(
-                            label=f"Token: {row['token']} (Waktu Sinkronisasi: {row['created_at'].strftime('%H:%M:%S')})",
-                            value=f"${float(row['price']):,.4f}"
+                            label=f"Token: {row['token']} ({price_source} - Sync Model: {row['created_at'].strftime('%H:%M:%S')})",
+                            value=f"${display_price:,.4f}"
                         )
                     with c2:
                         status = row['signal_status']
