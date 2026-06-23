@@ -100,25 +100,41 @@ class TradingSignalCenter:
             print(f"   [TELEGRAM NEWS ERROR] Gangguan koneksi API Telegram pada modul berita: {str(e)}")
 
     def scan_market_for_signals(self):
-        """Membaca data historis lokal, mengekstrak fitur, memprediksi arah, dan memperbarui DB"""
-        file_paths = {
-            "BTC": os.path.join(self.data_dir, "BTC_1h.csv"),
-            "ETH": os.path.join(self.data_dir, "ETH_1h.csv"),
-            "SOL": os.path.join(self.data_dir, "SOL_1h.csv"),
-            "XRP": os.path.join(self.data_dir, "XRP_1h.csv"),
-            "BNB": os.path.join(self.data_dir, "BNB_1h.csv")
-        }
+        """Membaca data dari Cassandra, mengekstrak fitur, memprediksi arah, dan memperbarui DB"""
+        tokens = ["BTC", "ETH", "SOL", "XRP", "BNB"]
         
+        # Setup koneksi sementara ke Cassandra untuk scan
+        import os
+        from cassandra.cluster import Cluster
+        cass_host = os.environ.get("CASSANDRA_HOST", "127.0.0.1")
+        cass_port = int(os.environ.get("CASSANDRA_PORT", 9042))
+        cluster = Cluster([cass_host], port=cass_port)
+        session = cluster.connect("crypto_ks")
+        
+        # Kirim session ke engineer
+        self.engineer.cassandra_session = session
+
         print("\n" + "="*50)
         print(f"[*] MENJALANKAN SCANNER SINYAL TRADING ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
         print("="*50)
 
-        for token, file_path in file_paths.items():
-            if not os.path.exists(file_path):
-                print(f"[!] Berkas data untuk {token} tidak ditemukan di folder DATA.")
+        for token in tokens:
+            # Mengambil 50 baris terakhir (cukup untuk fitur EMA 50 dan BB)
+            query = f'SELECT datetime, open, high, low, close, volume FROM signals WHERE "token" = \'{token}\' ORDER BY datetime DESC LIMIT 100'
+            try:
+                rows = session.execute(query)
+                data = [{"Datetime": row.datetime, "Open": row.open, "High": row.high, "Low": row.low, "Close": row.close, "Volume": row.volume} for row in rows]
+                df_raw = pd.DataFrame(data)
+                if not df_raw.empty:
+                    df_raw["Datetime"] = pd.to_datetime(df_raw["Datetime"])
+                    df_raw = df_raw.sort_values("Datetime").reset_index(drop=True)
+            except Exception as e:
+                print(f"[!] Gagal membaca data {token} dari Cassandra: {e}")
                 continue
                 
-            df_raw = pd.read_csv(file_path, low_memory=False)
+            if df_raw.empty:
+                print(f"[!] Data historis untuk {token} tidak ditemukan di Cassandra.")
+                continue
             df_features = self.engineer.build_features(df_raw, token, is_training=False)
             
             if df_features.empty:

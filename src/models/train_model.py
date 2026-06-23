@@ -7,7 +7,41 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.ml.feature import VectorAssembler
 import xgboost.spark as xgb_spark
+from cassandra.cluster import Cluster
 from src.features.feature_engineering import CryptoFeatureEngineer
+
+# Konfigurasi Cassandra — single node (localhost)
+CASSANDRA_HOST = os.environ.get("CASSANDRA_HOST", "127.0.0.1")
+CASSANDRA_PORT = int(os.environ.get("CASSANDRA_PORT", 9042))
+CASSANDRA_KEYSPACE = "crypto_ks"
+CASSANDRA_TABLE = "signals"
+
+
+def load_token_from_cassandra(session, token: str) -> pd.DataFrame:
+    """
+    Membaca data OHLCV untuk satu token dari Cassandra dan 
+    mengembalikannya sebagai Pandas DataFrame.
+    """
+    query = f'SELECT datetime, open, high, low, close, volume FROM signals WHERE "token" = \'{token}\''
+    rows = session.execute(query)
+    
+    data = []
+    for row in rows:
+        data.append({
+            "Datetime": row.datetime,
+            "Open": row.open,
+            "High": row.high,
+            "Low": row.low,
+            "Close": row.close,
+            "Volume": row.volume
+        })
+    
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df["Datetime"] = pd.to_datetime(df["Datetime"])
+        df = df.sort_values("Datetime").reset_index(drop=True)
+    return df
+
 
 def execute_model_training():
     TARGET_DATA_DIR = str(Path(__file__).resolve().parents[2] / "DATA")
@@ -15,26 +49,28 @@ def execute_model_training():
     
     os.makedirs(MODEL_DIR, exist_ok=True)
     os.makedirs(TARGET_DATA_DIR, exist_ok=True)
-    engineer = CryptoFeatureEngineer(data_dir=TARGET_DATA_DIR)
-    
-    file_paths = {
-        "BTC": os.path.join(TARGET_DATA_DIR, "BTC_1h.csv"),
-        "ETH": os.path.join(TARGET_DATA_DIR, "ETH_1h.csv"),
-        "SOL": os.path.join(TARGET_DATA_DIR, "SOL_1h.csv"),
-        "XRP": os.path.join(TARGET_DATA_DIR, "XRP_1h.csv"),
-        "BNB": os.path.join(TARGET_DATA_DIR, "BNB_1h.csv")
-    }
-    
+
+    print("\n" + "="*50)
+    print("[*] MEMULAI RE-TRAINING MULTI-TOKEN MODEL XGBOOST")
+    print("[*] Sumber data: Cassandra (crypto_ks.signals)")
+    print("="*50)
+
+    # --- Koneksi ke Cassandra (harus sebelum engineer) ---
+    print(f"[*] Menghubungkan ke Cassandra ({CASSANDRA_HOST}:{CASSANDRA_PORT})...")
+    cass_cluster = Cluster([CASSANDRA_HOST], port=CASSANDRA_PORT)
+    cass_session = cass_cluster.connect(CASSANDRA_KEYSPACE)
+    print("[+] Cassandra terhubung.")
+
+    engineer = CryptoFeatureEngineer(data_dir=TARGET_DATA_DIR, cassandra_session=cass_session)
+
+    TOKENS = ["BTC", "ETH", "SOL", "XRP", "BNB"]
+
     feature_columns = [
         "Return_1h", "Return_3h", "Return_12h", 
         "BB_Position", "Volume_Ratio", "BTC_Vol_1h", "BTC_Vol_3h",
         "Trend_Direction", "Volatility_Regime"
     ]
     joblib.dump(feature_columns, os.path.join(MODEL_DIR, "feature_columns.pkl"))
-
-    print("\n" + "="*50)
-    print("[*] MEMULAI RE-TRAINING MULTI-TOKEN MODEL XGBOOST")
-    print("="*50)
 
     python_executable = sys.executable
     os.environ["PYSPARK_PYTHON"] = python_executable
@@ -45,6 +81,8 @@ def execute_model_training():
         .master("local[*]") \
         .appName("SparkXGBoostTraining") \
         .config("spark.driver.bindAddress", "127.0.0.1") \
+        .config("spark.cassandra.connection.host", CASSANDRA_HOST) \
+        .config("spark.cassandra.connection.port", str(CASSANDRA_PORT)) \
         .config("spark.pyspark.driver.python", python_executable) \
         .config("spark.pyspark.python", python_executable) \
         .config("spark.executorEnv.PYSPARK_PYTHON", python_executable) \
@@ -52,12 +90,17 @@ def execute_model_training():
         .getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
-    for token, file_path in file_paths.items():
-        if not os.path.exists(file_path):
-            print(f"[!] Skip training {token}, file tidak ditemukan di {file_path}")
+    for token in TOKENS:
+        print(f"\n--- Token: {token} ---")
+        
+        # Membaca data dari Cassandra (bukan dari CSV)
+        df_raw = load_token_from_cassandra(cass_session, token)
+        
+        if df_raw.empty:
+            print(f"[!] Skip training {token}, tidak ada data di Cassandra.")
             continue
             
-        df_raw = pd.read_csv(file_path, low_memory=False)
+        print(f"[*] {len(df_raw)} baris data {token} berhasil dibaca dari Cassandra.")
         df_processed = engineer.build_features(df_raw, token, is_training=True)
         
         if len(df_processed) < 100:
@@ -100,16 +143,15 @@ def execute_model_training():
 
         spark_model = classifier.fit(spark_train)
 
-        spark_model_dir = os.path.join(MODEL_DIR, f"{token.lower()}_spark_model")
-        if os.path.exists(spark_model_dir):
-            shutil.rmtree(spark_model_dir)
-        spark_model.save(spark_model_dir)
-
         booster_path = os.path.join(MODEL_DIR, f"{token.lower()}_xgb_model.json")
         booster = spark_model.get_booster()
         booster.save_model(booster_path)
 
-        print(f"[+] Model {token} berhasil diperbarui dan diekspor.")
+        print(f"[+] Model {token} berhasil diperbarui dan diekspor (Booster Only).")
+
+    # --- Cleanup koneksi Cassandra ---
+    cass_cluster.shutdown()
+    print("\n[+] Koneksi Cassandra ditutup. Training selesai.")
 
 if __name__ == "__main__":
     execute_model_training()

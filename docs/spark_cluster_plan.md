@@ -81,3 +81,36 @@ Langkah selanjutnya yang bisa saya lakukan (pilih salah satu)
 Catatan
 - Jangan ubah kode pelatihan Python saat ini; perubahan akhir hanya mengarahkan `SparkSession.builder.master` ke `spark://<master-ip>:7077` atau menjalankan lewat `spark-submit --master`.
 - Di Windows, gunakan skrip `sbin` yang disediakan Spark atau gunakan WSL untuk konsistensi shell.
+
+---
+
+# Rencana Integrasi Big Data Pipeline (Kafka & Cassandra)
+
+Selain arsitektur Spark Standalone di atas, kita akan menambahkan Kafka dan Cassandra ke dalam pipeline untuk memfasilitasi streaming data dan penyimpanan terdistribusi. Berikut adalah rancangan alurnya:
+
+## 1. Arsitektur Data Pipeline
+- **Data Ingestion (Kafka Producer)**: Script Python mengambil data sinyal crypto dari sumber (misal: API eksternal) dan melakukan *publish* data tersebut ke sebuah topik di Kafka.
+- **Data Storage (Kafka Consumer ke Cassandra)**: Script Consumer membaca *stream* pesan dari Kafka dan menyimpannya secara persisten ke tabel di dalam database Cassandra. Cassandra bertindak sebagai *Data Lake / Data Warehouse* utama.
+- **Model Training (Spark + Cassandra)**: Aplikasi Spark yang berjalan di klaster (Master & Worker) membaca data *training* langsung dari Cassandra menggunakan `spark-cassandra-connector`.
+- **Model XGBoost**: Data yang dibaca oleh Spark dari Cassandra akan diproses, kemudian dilatih secara terdistribusi menggunakan library XGBoost untuk Spark.
+
+## 2. Persiapan Infrastruktur Tambahan (Docker di Laptop Master)
+Karena kita ingin mempermudah instalasi dan memastikan Kafka serta Cassandra bisa berkomunikasi lewat LAN, kita akan **menggunakan Docker (Docker Compose)** dan menjalankannya cukup di **satu laptop (Laptop Master)**. 
+
+1. **Docker Compose**:
+   - Kita akan membuat file `docker-compose.yml` di direktori proyek.
+   - File ini akan menjalankan 3 *container*: **Zookeeper**, **Kafka**, dan **Cassandra**.
+   
+2. **Komunikasi LAN (Port Mapping)**:
+   - **Kafka**: Meng-expose port `9092` (`-p 9092:9092`) dan disetel dengan konfigurasi `KAFKA_ADVERTISED_LISTENERS` mengarah ke IP LAN Master. Ini memungkinkan Laptop Worker untuk mem-publish atau men-subscribe pesan Kafka.
+   - **Cassandra**: Meng-expose port `9042` (`-p 9042:9042`) agar Spark di Laptop Worker bisa melakukan proses query dari dan ke Cassandra menggunakan `spark-cassandra-connector`.
+   - Pastikan *Windows Firewall* di Laptop Master mengizinkan koneksi *inbound* untuk port 9092 dan 9042.
+
+3. **Inisialisasi Cassandra**:
+   - Setelah Cassandra berjalan, kita akan mengeksekusi perintah inisialisasi untuk membuat *Keyspace* (misal: `crypto_ks`) dan *Table* (misal: `signals`) untuk menampung data.
+
+## 3. Komponen Kode yang Akan Ditambahkan/Diubah
+- `src/data/kafka_producer.py`: Script untuk mengambil data dan publish ke Kafka.
+- `src/data/kafka_to_cassandra.py`: Script consumer untuk insert data dari Kafka ke Cassandra.
+- `src/models/train_model.py`: Diubah untuk menambahkan konfigurasi koneksi Cassandra (`spark.cassandra.connection.host`) di `SparkSession` dan membaca DataFrame menggunakan `.format("org.apache.spark.sql.cassandra")`. Akan ditambahkan library XGBoost untuk PySpark.
+- `requirements.txt`: Tambahan `kafka-python` dan `cassandra-driver`.

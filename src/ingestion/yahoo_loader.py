@@ -29,6 +29,11 @@ class YahooDataLoader:
             raise RuntimeError(f"[!] Gagal mengunduh data untuk {token}.")
             
         df = df.reset_index()
+        
+        # Flatten MultiIndex columns jika yfinance mengembalikan MultiIndex
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0] for col in df.columns]
+            
         # Standardisasi nama kolom utama
         df.rename(columns={"Datetime": "Datetime", "Date": "Datetime"}, inplace=True)
         return df

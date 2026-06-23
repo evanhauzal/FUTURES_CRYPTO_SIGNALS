@@ -7,33 +7,9 @@ import yfinance as yf
 import pandas as pd
 from src.signals.generator import TradingSignalCenter
 
-def append_price_to_local_csv(data_dir: str, token: str, price: float):
-    """
-    Menambahkan data harga baru dari yfinance ke file CSV lokal 
-    agar data fitur yang dibaca oleh model ML selalu diperbarui.
-    """
-    file_name = f"{token}_1h.csv"
-    file_path = os.path.join(data_dir, file_name)
-    
-    current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    new_data = pd.DataFrame([{
-        "Datetime": current_time_str,
-        "Open": price,
-        "High": price,
-        "Low": price,
-        "Close": price,
-        "Volume": 0
-    }])
-    
-    if os.path.exists(file_path):
-        new_data.to_csv(file_path, mode='a', header=False, index=False)
-    else:
-        new_data.to_csv(file_path, index=False)
-
 def start_price_pipeline():
     print("\n" + "="*60)
-    print("[*] BACKEND PIPELINE: FULL EXPERIMENT (LIVE DATA + RETRAIN + SCANNER + REAL NEWS)")
+    print("[*] BACKEND PIPELINE: FULL EXPERIMENT (KAFKA + CASSANDRA + RETRAIN + SCANNER)")
     print("="*60)
     
     scanner = TradingSignalCenter()
@@ -47,24 +23,21 @@ def start_price_pipeline():
             print(f"\n[*] Siklus eksperimen penuh dimulai pada: {time.strftime('%Y-%m-%d %H:%M:%S')}")
             
             # -----------------------------------------------------------------
-            # STEP 1: Ambil data harga live dari yfinance dan perbarui file lokal
+            # STEP 1: Ambil data harga live menggunakan Kafka Producer
             # -----------------------------------------------------------------
-            print("\n[STEP 1] Menyinkronkan data live ke file CSV lokal...")
-            for ticker in tokens:
-                try:
-                    crypto = yf.Ticker(ticker)
-                    df_latest = crypto.history(period="1d", interval="1m")
-                    
-                    if not df_latest.empty:
-                        last_row = df_latest.iloc[-1]
-                        token_name = ticker.split("-")[0]
-                        current_price = float(last_row["Close"])
-                        
-                        append_price_to_local_csv(scanner.data_dir, token_name, current_price)
-                        print(f"   [+] Data live {token_name} (${current_price:.2f}) masuk ke CSV.")
-                        
-                except Exception as e:
-                    print(f"   [!] Gagal sinkronisasi data {ticker}: {str(e)}")
+            print("\n[STEP 1] Menyinkronkan data live ke Kafka & Cassandra...")
+            try:
+                # Memanggil skrip kafka_producer.py secara independen
+                subprocess.run(
+                    [sys.executable, "-m", "src.ingestion.kafka_producer"],
+                    check=True
+                )
+                print("   [+] Sinkronisasi Kafka Producer selesai.")
+                # Memberi waktu sejenak agar Consumer sempat memproses & insert ke Cassandra
+                print("   [*] Menunggu 5 detik agar Consumer selesai menulis ke Cassandra...")
+                time.sleep(5)
+            except Exception as e:
+                print(f"   [!] Gagal menjalankan Kafka Producer: {str(e)}")
             
             # -----------------------------------------------------------------
             # STEP 1B: Memeriksa dan mengirimkan berita pasar kripto dari DATABASE ASLI

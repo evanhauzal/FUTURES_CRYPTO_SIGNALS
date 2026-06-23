@@ -1,8 +1,7 @@
 import time
 from src.ingestion.news_collector import GlobalNewsCollector
 from src.ingestion.save_to_db import TradingDatabaseConnector
-# Sesuaikan modul import ini dengan nama file tempat kelas TradingSignalCenter Anda berada
-from src.ingestion.run_signal_pipeline import TradingSignalCenter
+from src.signals.generator import TradingSignalCenter
 
 def start_news_pipeline(api_key: str):
     print("\n" + "="*60)

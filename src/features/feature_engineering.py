@@ -1,12 +1,62 @@
 import os
 import pandas as pd
 import numpy as np
+from cassandra.cluster import Cluster
+
+# Konfigurasi Cassandra — single node (localhost)
+CASSANDRA_HOST = os.environ.get("CASSANDRA_HOST", "127.0.0.1")
+CASSANDRA_PORT = int(os.environ.get("CASSANDRA_PORT", 9042))
+CASSANDRA_KEYSPACE = "crypto_ks"
+
 
 class CryptoFeatureEngineer:
-    def __init__(self, data_dir: str = "DATA"):
+    def __init__(self, data_dir: str = "DATA", cassandra_session=None):
         self.data_dir = data_dir
+        self.cassandra_session = cassandra_session
+
+    def _get_cassandra_session(self):
+        """
+        Mendapatkan koneksi Cassandra. Jika belum ada, buat koneksi baru.
+        """
+        if self.cassandra_session is None:
+            try:
+                cluster = Cluster([CASSANDRA_HOST], port=CASSANDRA_PORT)
+                self.cassandra_session = cluster.connect(CASSANDRA_KEYSPACE)
+                self._owns_cluster = cluster  # simpan referensi untuk cleanup
+            except Exception as e:
+                print(f"[!] Gagal konek ke Cassandra: {e}. Fallback ke CSV.")
+                return None
+        return self.cassandra_session
 
     def load_btc_anchor_features(self) -> pd.DataFrame:
+        """
+        Membaca data BTC untuk fitur jangkar (BTC_Vol_1h, BTC_Vol_3h).
+        Sumber utama: Cassandra. Fallback: file CSV lokal.
+        """
+        session = self._get_cassandra_session()
+
+        if session is not None:
+            # --- Baca dari Cassandra ---
+            try:
+                query = 'SELECT datetime, close FROM signals WHERE "token" = \'BTC\''
+                rows = session.execute(query)
+                data = [{"Datetime": row.datetime, "Close": row.close} for row in rows]
+                btc_df = pd.DataFrame(data)
+
+                if not btc_df.empty:
+                    btc_df["Datetime"] = pd.to_datetime(btc_df["Datetime"]).dt.tz_localize(None)
+                    btc_df = btc_df.sort_values("Datetime").reset_index(drop=True)
+                    btc_df["Close"] = pd.to_numeric(btc_df["Close"], errors="coerce")
+                    btc_df = btc_df.dropna(subset=["Datetime", "Close"])
+
+                    btc_df["BTC_Vol_1h"] = btc_df["Close"].pct_change(1).abs()
+                    btc_df["BTC_Vol_3h"] = btc_df["Close"].pct_change(3).abs()
+                    print("[+] Fitur jangkar BTC berhasil dibaca dari Cassandra.")
+                    return btc_df[["Datetime", "BTC_Vol_1h", "BTC_Vol_3h"]]
+            except Exception as e:
+                print(f"[!] Gagal baca BTC dari Cassandra: {e}. Fallback ke CSV.")
+
+        # --- Fallback: Baca dari CSV ---
         btc_path = os.path.join(self.data_dir, "BTC_1h.csv") 
         if not os.path.exists(btc_path):
             raise FileNotFoundError(f"[!] File jangkar {btc_path} wajib ada di direktori DATA.")
@@ -20,6 +70,7 @@ class CryptoFeatureEngineer:
         
         btc_df["BTC_Vol_1h"] = btc_df["Close"].pct_change(1).abs()
         btc_df["BTC_Vol_3h"] = btc_df["Close"].pct_change(3).abs()
+        print("[*] Fitur jangkar BTC dibaca dari CSV (fallback).")
         return btc_df[["Datetime", "BTC_Vol_1h", "BTC_Vol_3h"]]
 
     def build_features(self, df: pd.DataFrame, token: str, is_training: bool = True) -> pd.DataFrame:
