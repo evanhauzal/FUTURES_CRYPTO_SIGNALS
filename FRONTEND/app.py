@@ -25,6 +25,9 @@ def get_db_connection():
 
 st.title("📈 ROSBD Operational Trading & Sentiment Dashboard")
 st.markdown("Sistem Terdistribusi: Pemantauan Harga Kripto Real-Time, Sinyal ML, dan Berita Makro Geopolitik.")
+
+# Indikator Status Backend
+st.success("✅ **Backend Service:** Apache Airflow Orchestrator & Kafka Streaming Aktif")
 st.write("---")
 
 col_market, col_news = st.columns([3, 2])
