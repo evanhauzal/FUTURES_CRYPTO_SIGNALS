@@ -71,13 +71,31 @@ with DAG(
     train_model_task = BashOperator(
         task_id="train_model",
         bash_command="""
-            export CASSANDRA_HOST=cassandra
-            export CASSANDRA_PORT=9042
-            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-            cd /opt/airflow && python -m src.models.train_model
+            echo "[*] Mengirim trigger ke Laptop 1 (Windows Host) untuk menjalankan Spark Cluster..."
+            touch /opt/airflow/DATA/trigger_train.txt
+            
+            echo "[*] Menunggu proses Distributed Spark selesai di host..."
+            # Looping selama file trigger masih ada (artinya daemon di host sedang bekerja)
+            while [ -f /opt/airflow/DATA/trigger_train.txt ]; do
+                sleep 5
+            done
+            
+            # Cek hasil dari daemon host
+            if [ -f /opt/airflow/DATA/train_success.txt ]; then
+                echo "[+] Distributed Spark training sukses!"
+                rm /opt/airflow/DATA/train_success.txt
+                exit 0
+            elif [ -f /opt/airflow/DATA/train_failed.txt ]; then
+                echo "[-] Distributed Spark training gagal!"
+                rm /opt/airflow/DATA/train_failed.txt
+                exit 1
+            else
+                echo "[-] Proses selesai tapi tidak ada sinyal sukses/gagal. Asumsikan error."
+                exit 1
+            fi
         """,
         # Training bisa memakan waktu lama
-        execution_timeout=timedelta(minutes=30),
+        execution_timeout=timedelta(minutes=45),
     )
 
     # ----------------------------------------------------------
