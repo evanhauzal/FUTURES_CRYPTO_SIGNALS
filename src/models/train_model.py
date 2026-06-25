@@ -90,9 +90,10 @@ def execute_model_training():
     ]
     joblib.dump(feature_columns, os.path.join(MODEL_DIR, "feature_columns.pkl"))
 
-    python_executable = sys.executable
-    os.environ["PYSPARK_PYTHON"] = python_executable
-    os.environ["PYSPARK_DRIVER_PYTHON"] = python_executable
+    # Gunakan pemanggilan 'python' secara umum daripada path absolut
+    # Ini mencegah error jika lokasi instalasi Python di Laptop 1 dan Laptop 2 berbeda
+    os.environ["PYSPARK_PYTHON"] = "python"
+    os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
     # Jika jalan di cluster, pastikan bindAddress pakai 0.0.0.0 agar bisa diakses
     bind_addr = "127.0.0.1" if SPARK_MASTER.startswith("local") else "0.0.0.0"
