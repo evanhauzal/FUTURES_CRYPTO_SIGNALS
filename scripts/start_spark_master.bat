@@ -3,6 +3,11 @@ echo ========================================================
 echo [*] Memulai Spark Master Server
 echo ========================================================
 
+echo [*] Memastikan winutils.exe (Hadoop) tersedia di Windows...
+python "%~dp0setup_winutils.py"
+set HADOOP_HOME=C:\hadoop
+set PATH=%HADOOP_HOME%\bin;%PATH%
+
 set SPARK_LOCAL_IP=192.168.1.10
 echo [*] SPARK_LOCAL_IP disetel ke %SPARK_LOCAL_IP%
 

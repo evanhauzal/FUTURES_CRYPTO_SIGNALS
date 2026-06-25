@@ -4,6 +4,13 @@ import sys
 import joblib
 import pandas as pd
 from pathlib import Path
+
+# Daftarkan root folder (FUTURES_CRYPTO_SIGNALS) ke dalam path Python 
+# agar import 'src.*' berhasil saat dieksekusi via spark-submit
+project_root = str(Path(__file__).resolve().parents[2])
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from pyspark.sql import SparkSession
 from pyspark.ml.feature import VectorAssembler
 import xgboost.spark as xgb_spark
@@ -15,6 +22,7 @@ import yaml
 CASSANDRA_HOST = os.environ.get("CASSANDRA_HOST", "127.0.0.1")
 CASSANDRA_PORT = int(os.environ.get("CASSANDRA_PORT", 9042))
 SPARK_MASTER = os.environ.get("SPARK_MASTER_URL", "local[*]")
+DRIVER_IP = "127.0.0.1"
 SPARK_NUM_WORKERS = 1
 
 # Coba baca config YAML jika ada
@@ -28,7 +36,8 @@ if CONFIG_PATH.exists():
                 CASSANDRA_HOST = scfg.get("cassandra_host", CASSANDRA_HOST)
                 CASSANDRA_PORT = scfg.get("cassandra_port", CASSANDRA_PORT)
                 SPARK_MASTER = f"spark://{scfg['master_ip']}:{scfg['master_port']}"
-                SPARK_NUM_WORKERS = 2  # default untuk 1 master + 1 worker setup
+                DRIVER_IP = scfg['master_ip']
+                SPARK_NUM_WORKERS = 1  # 1 Worker node = 1 Executor = 1 XGBoost worker
     except Exception as e:
         print(f"[!] Gagal membaca spark_cluster.yml: {e}")
 CASSANDRA_KEYSPACE = "crypto_ks"
@@ -104,12 +113,13 @@ def execute_model_training():
         .master(SPARK_MASTER) \
         .appName("SparkXGBoostTraining") \
         .config("spark.driver.bindAddress", bind_addr) \
+        .config("spark.driver.host", DRIVER_IP) \
         .config("spark.cassandra.connection.host", CASSANDRA_HOST) \
         .config("spark.cassandra.connection.port", str(CASSANDRA_PORT)) \
-        .config("spark.pyspark.driver.python", python_executable) \
-        .config("spark.pyspark.python", python_executable) \
-        .config("spark.executorEnv.PYSPARK_PYTHON", python_executable) \
-        .config("spark.executorEnv.PYSPARK_DRIVER_PYTHON", python_executable) \
+        .config("spark.pyspark.driver.python", os.environ["PYSPARK_DRIVER_PYTHON"]) \
+        .config("spark.pyspark.python", os.environ["PYSPARK_PYTHON"]) \
+        .config("spark.executorEnv.PYSPARK_PYTHON", os.environ["PYSPARK_PYTHON"]) \
+        .config("spark.executorEnv.PYSPARK_DRIVER_PYTHON", os.environ["PYSPARK_DRIVER_PYTHON"]) \
         .getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
