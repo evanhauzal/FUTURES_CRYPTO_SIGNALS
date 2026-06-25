@@ -186,5 +186,9 @@ def execute_model_training():
     cass_cluster.shutdown()
     print("\n[+] Koneksi Cassandra ditutup. Training selesai.")
 
+    # Tulis flag sukses untuk memberitahu Daemon bahwa proses ini 100% selesai
+    # (Ini untuk mengatasi bug PySpark di Windows yang sering exit dengan kode error saat cleanup)
+    (Path(__file__).resolve().parents[2] / "DATA" / "spark_success.flag").touch()
+
 if __name__ == "__main__":
     execute_model_training()

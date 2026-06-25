@@ -107,10 +107,28 @@ with DAG(
     scan_signals_task = BashOperator(
         task_id="scan_signals",
         bash_command="""
-            export CASSANDRA_HOST=cassandra
-            export CASSANDRA_PORT=9042
-            cd /opt/airflow && python -m src.signals.generator
+            echo "[*] Mengirim trigger ke Windows Host untuk menjalankan Scan Signals (bypassing IPv6 Docker limit)..."
+            touch /opt/airflow/DATA/trigger_scan.txt
+            
+            echo "[*] Menunggu proses Scan Signals selesai di host..."
+            while [ -f /opt/airflow/DATA/trigger_scan.txt ]; do
+                sleep 5
+            done
+            
+            if [ -f /opt/airflow/DATA/train_success.txt ]; then
+                echo "[+] Scan signals sukses!"
+                rm /opt/airflow/DATA/train_success.txt
+                exit 0
+            elif [ -f /opt/airflow/DATA/train_failed.txt ]; then
+                echo "[-] Scan signals gagal!"
+                rm -f /opt/airflow/DATA/train_failed.txt
+                exit 1
+            else
+                echo "[-] Proses selesai tapi tidak ada sinyal sukses/gagal. Asumsikan error."
+                exit 1
+            fi
         """,
+        execution_timeout=timedelta(minutes=15),
     )
 
     # ----------------------------------------------------------

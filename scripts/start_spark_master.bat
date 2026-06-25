@@ -16,7 +16,7 @@ FOR /F "tokens=*" %%i IN ('python -c "import pyspark; import os; print(os.path.d
 echo [*] SPARK_HOME ditemukan di: %SPARK_HOME%
 
 echo [*] Memulai Airflow Trigger Daemon di background...
-start "Airflow-Spark Daemon" python "%~dp0spark_trigger_daemon.py"
+start "Airflow-Spark Daemon" cmd /k "python ""%~dp0spark_trigger_daemon.py"""
 
 echo [*] Menjalankan Master (Port 7077, WebUI Port 8080)...
 "%SPARK_HOME%\bin\spark-class2.cmd" org.apache.spark.deploy.master.Master --ip 192.168.1.10 --port 7077 --webui-port 8080

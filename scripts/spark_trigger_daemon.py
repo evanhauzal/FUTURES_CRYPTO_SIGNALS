@@ -9,6 +9,7 @@ def run_daemon():
     data_dir.mkdir(exist_ok=True)
     
     trigger_file = data_dir / "trigger_train.txt"
+    trigger_scan = data_dir / "trigger_scan.txt"
     success_file = data_dir / "train_success.txt"
     failed_file = data_dir / "train_failed.txt"
     
@@ -19,6 +20,7 @@ def run_daemon():
     print("[*] Menunggu trigger dari Airflow DAG...")
     
     while True:
+        # --- BLOK TRIGGER TRAINING (SPARK) ---
         if trigger_file.exists():
             print("\n[!] Trigger dari Airflow terdeteksi! Memulai proses Distributed Training...")
             
@@ -35,20 +37,56 @@ def run_daemon():
                 print(f"[*] Mengeksekusi: {' '.join(cmd)}")
                 result = subprocess.run(cmd, cwd=str(project_root), shell=True)
                 
-                if result.returncode == 0:
-                    print("\n[+] Training berhasil diselesaikan!")
+                spark_flag = data_dir / "spark_success.flag"
+                if spark_flag.exists():
+                    print("\n[+] Training berhasil diselesaikan secara penuh (Flag terdeteksi)!")
                     success_file.touch()
+                    spark_flag.unlink()
                 else:
-                    print(f"\n[-] Training gagal dengan kode {result.returncode}")
+                    print(f"\n[-] Training gagal atau terputus (Kode Exit: {result.returncode})")
                     failed_file.touch()
                     
-            except Exception as e:
-                print(f"[-] Terjadi error pada sistem: {e}")
+            except BaseException as e:
+                print(f"[-] Terjadi error atau interupsi pada sistem: {e}")
                 failed_file.touch()
             finally:
-                # Hapus trigger untuk memberitahu Airflow bahwa eksekusi selesai
-                trigger_file.unlink()
-                print("[*] Menunggu trigger berikutnya...")
+                time.sleep(2)
+                if trigger_file.exists():
+                    trigger_file.unlink()
+                print("\n[*] Menunggu trigger berikutnya...")
+                
+        # --- BLOK TRIGGER SCAN SIGNALS (SUPABASE IPv6) ---
+        elif trigger_scan.exists():
+            print("\n[!] Trigger Airflow: Menjalankan Scanner Sinyal (Host Mode untuk IPv6)...")
+            
+            if success_file.exists(): success_file.unlink()
+            if failed_file.exists(): failed_file.unlink()
+            
+            try:
+                cmd = ["python", "-m", "src.signals.generator"]
+                print(f"[*] Mengeksekusi: {' '.join(cmd)}")
+                
+                # Setup environment var untuk Cassandra local
+                env = os.environ.copy()
+                env["CASSANDRA_HOST"] = "127.0.0.1"
+                env["CASSANDRA_PORT"] = "9042"
+                
+                result = subprocess.run(cmd, cwd=str(project_root), env=env, shell=True)
+                
+                if result.returncode == 0:
+                    print("\n[+] Scan signals berhasil dieksekusi!")
+                    success_file.touch()
+                else:
+                    print(f"\n[-] Scan signals gagal (Kode Exit: {result.returncode})")
+                    failed_file.touch()
+            except BaseException as e:
+                print(f"[-] Terjadi error saat scan signals: {e}")
+                failed_file.touch()
+            finally:
+                time.sleep(2)
+                if trigger_scan.exists():
+                    trigger_scan.unlink()
+                print("\n[*] Menunggu trigger berikutnya...")
                 
         time.sleep(3)
 
