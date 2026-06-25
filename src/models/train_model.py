@@ -9,10 +9,28 @@ from pyspark.ml.feature import VectorAssembler
 import xgboost.spark as xgb_spark
 from cassandra.cluster import Cluster
 from src.features.feature_engineering import CryptoFeatureEngineer
+import yaml
 
-# Konfigurasi Cassandra — single node (localhost)
+# Default configuration
 CASSANDRA_HOST = os.environ.get("CASSANDRA_HOST", "127.0.0.1")
 CASSANDRA_PORT = int(os.environ.get("CASSANDRA_PORT", 9042))
+SPARK_MASTER = os.environ.get("SPARK_MASTER_URL", "local[*]")
+SPARK_NUM_WORKERS = 1
+
+# Coba baca config YAML jika ada
+CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "spark_cluster.yml"
+if CONFIG_PATH.exists():
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            cfg = yaml.safe_load(f)
+            if "spark_cluster" in cfg:
+                scfg = cfg["spark_cluster"]
+                CASSANDRA_HOST = scfg.get("cassandra_host", CASSANDRA_HOST)
+                CASSANDRA_PORT = scfg.get("cassandra_port", CASSANDRA_PORT)
+                SPARK_MASTER = f"spark://{scfg['master_ip']}:{scfg['master_port']}"
+                SPARK_NUM_WORKERS = 2  # default untuk 1 master + 1 worker setup
+    except Exception as e:
+        print(f"[!] Gagal membaca spark_cluster.yml: {e}")
 CASSANDRA_KEYSPACE = "crypto_ks"
 CASSANDRA_TABLE = "signals"
 
@@ -75,12 +93,16 @@ def execute_model_training():
     python_executable = sys.executable
     os.environ["PYSPARK_PYTHON"] = python_executable
     os.environ["PYSPARK_DRIVER_PYTHON"] = python_executable
-    os.environ["SPARK_LOCAL_IP"] = "127.0.0.1"
+
+    # Jika jalan di cluster, pastikan bindAddress pakai 0.0.0.0 agar bisa diakses
+    bind_addr = "127.0.0.1" if SPARK_MASTER.startswith("local") else "0.0.0.0"
+
+    print(f"[*] Menjalankan Spark dengan Master URL: {SPARK_MASTER}")
 
     spark = SparkSession.builder \
-        .master("local[*]") \
+        .master(SPARK_MASTER) \
         .appName("SparkXGBoostTraining") \
-        .config("spark.driver.bindAddress", "127.0.0.1") \
+        .config("spark.driver.bindAddress", bind_addr) \
         .config("spark.cassandra.connection.host", CASSANDRA_HOST) \
         .config("spark.cassandra.connection.port", str(CASSANDRA_PORT)) \
         .config("spark.pyspark.driver.python", python_executable) \
@@ -130,7 +152,7 @@ def execute_model_training():
             label_col="label",
             prediction_col="prediction",
             probability_col="probability",
-            num_workers=1,
+            num_workers=SPARK_NUM_WORKERS,
             n_estimators=150,
             max_depth=4,
             learning_rate=0.03,
