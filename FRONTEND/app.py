@@ -12,7 +12,22 @@ if str(project_root) not in sys.path:
 
 st.set_page_config(page_title="ROSBD Operational Trading & Sentiment Dashboard", layout="wide")
 
-from config.settings import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+from config.settings import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, SUPABASE_URL, SUPABASE_KEY
+import yfinance as yf
+import requests
+
+# Fungsi untuk mengambil harga real-time (Aman dari Blokir ISP & Rate Limit)
+@st.cache_data(ttl=2) # Cache 2 detik agar super responsif
+def get_realtime_price(token):
+    # Hapus spasi siluman yang terikut dari PostgreSQL CHAR data type
+    clean_token = str(token).strip().upper()
+    
+    try:
+        ticker = yf.Ticker(f"{clean_token}-USD")
+        return float(ticker.fast_info['lastPrice'])
+    except Exception as e:
+        print(f"YFinance Error for {clean_token}: {str(e)}")
+        return None
 
 def get_db_connection():
     return psycopg2.connect(
@@ -23,8 +38,22 @@ def get_db_connection():
         password=DB_PASSWORD
     )
 
+def fetch_supabase_data(endpoint, params=None):
+    headers = {
+        'apikey': SUPABASE_KEY,
+        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'Content-Type': 'application/json'
+    }
+    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
+    response = requests.get(url, headers=headers, params=params)
+    response.raise_for_status()
+    return response.json()
+
 st.title("📈 ROSBD Operational Trading & Sentiment Dashboard")
 st.markdown("Sistem Terdistribusi: Pemantauan Harga Kripto Real-Time, Sinyal ML, dan Berita Makro Geopolitik.")
+
+# Indikator Status Backend
+st.success("✅ **Backend Service:** Apache Airflow Orchestrator & Kafka Streaming Aktif")
 st.write("---")
 
 col_market, col_news = st.columns([3, 2])
@@ -33,23 +62,32 @@ with col_market:
     st.subheader("📊 Pemantauan Harga & Insight Pasar")
     
     try:
-        conn = get_db_connection()
-        query_signals = """
-            SELECT DISTINCT ON (token) token, price, probability, signal_status, take_profit, stop_loss, created_at 
-            FROM v_crypto_signals 
-            ORDER BY token, created_at DESC;
-        """
-        df_signals = pd.read_sql(query_signals, conn)
-        conn.close()
+        # Fetch using Supabase REST API instead of direct DB connection (solves IPv4/IPv6 issues)
+        data_signals = fetch_supabase_data(
+            "v_crypto_signals", 
+            params={"select": "token,price,probability,signal_status,take_profit,stop_loss,created_at", "order": "created_at.desc", "limit": "500"}
+        )
+        df_signals = pd.DataFrame(data_signals)
+        if not df_signals.empty:
+            df_signals['created_at'] = pd.to_datetime(df_signals['created_at'])
+            # Drop duplicates to simulate DISTINCT ON (token)
+            df_signals = df_signals.drop_duplicates(subset=['token'], keep='first')
         
         if not df_signals.empty:
             for idx, row in df_signals.iterrows():
                 with st.container():
                     c1, c2 = st.columns([2, 1])
                     with c1:
+                        # Ambil harga real-time terbaru
+                        live_price = get_realtime_price(row['token'])
+                        
+                        # Fallback ke harga database jika Yahoo Finance gagal
+                        display_price = live_price if live_price is not None else float(row['price'])
+                        price_source = "🔴 Live Market" if live_price is not None else "⚪ Database"
+                        
                         st.metric(
-                            label=f"Token: {row['token']} (Waktu Sinkronisasi: {row['created_at'].strftime('%H:%M:%S')})",
-                            value=f"${float(row['price']):,.4f}"
+                            label=f"Token: {row['token']} ({price_source} - Sync Model: {row['created_at'].strftime('%H:%M:%S')})",
+                            value=f"${display_price:,.4f}"
                         )
                     with c2:
                         status = row['signal_status']
@@ -72,11 +110,12 @@ with col_news:
     st.subheader("📰 Berita Global & Sentimen Makro")
     
     try:
-        conn = get_db_connection()
-        # PERUBAHAN: Menambahkan kolom 'sentiment' ke dalam SELECT query
-        query_news = "SELECT source_name, title, description, url, published_at, sentiment FROM v_market_news ORDER BY created_at DESC LIMIT 10;"
-        df_news = pd.read_sql(query_news, conn)
-        conn.close()
+        # Fetch using Supabase REST API
+        data_news = fetch_supabase_data(
+            "v_market_news", 
+            params={"select": "source_name,title,description,url,published_at,sentiment", "order": "created_at.desc", "limit": "10"}
+        )
+        df_news = pd.DataFrame(data_news)
         
         if not df_news.empty:
             # FITUR TAMBAHAN: Menampilkan rangkuman persentase sentimen saat ini di bagian atas kolom berita

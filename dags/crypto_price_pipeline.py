@@ -45,12 +45,11 @@ with DAG(
     # ----------------------------------------------------------
     kafka_producer_task = BashOperator(
         task_id="kafka_producer",
-        bash_command="cd /opt/airflow && python -m src.ingestion.kafka_producer",
-        env={
-            "KAFKA_BOOTSTRAP_SERVERS": "{{ var.value.get('kafka_servers', 'kafka:29092') }}",
-            "CASSANDRA_HOST": "{{ var.value.get('cassandra_host', 'cassandra') }}",
-            "CASSANDRA_PORT": "{{ var.value.get('cassandra_port', '9042') }}",
-        },
+        bash_command="""
+            export CASSANDRA_HOST=cassandra
+            export CASSANDRA_PORT=9042
+            cd /opt/airflow && python -m src.ingestion.kafka_producer
+        """,
     )
 
     # ----------------------------------------------------------
@@ -71,13 +70,32 @@ with DAG(
     # ----------------------------------------------------------
     train_model_task = BashOperator(
         task_id="train_model",
-        bash_command="cd /opt/airflow && python -m src.models.train_model",
-        env={
-            "CASSANDRA_HOST": "{{ var.value.get('cassandra_host', 'cassandra') }}",
-            "CASSANDRA_PORT": "{{ var.value.get('cassandra_port', '9042') }}",
-        },
+        bash_command="""
+            echo "[*] Mengirim trigger ke Laptop 1 (Windows Host) untuk menjalankan Spark Cluster..."
+            touch /opt/airflow/DATA/trigger_train.txt
+            
+            echo "[*] Menunggu proses Distributed Spark selesai di host..."
+            # Looping selama file trigger masih ada (artinya daemon di host sedang bekerja)
+            while [ -f /opt/airflow/DATA/trigger_train.txt ]; do
+                sleep 5
+            done
+            
+            # Cek hasil dari daemon host
+            if [ -f /opt/airflow/DATA/train_success.txt ]; then
+                echo "[+] Distributed Spark training sukses!"
+                rm /opt/airflow/DATA/train_success.txt
+                exit 0
+            elif [ -f /opt/airflow/DATA/train_failed.txt ]; then
+                echo "[-] Distributed Spark training gagal!"
+                rm /opt/airflow/DATA/train_failed.txt
+                exit 1
+            else
+                echo "[-] Proses selesai tapi tidak ada sinyal sukses/gagal. Asumsikan error."
+                exit 1
+            fi
+        """,
         # Training bisa memakan waktu lama
-        execution_timeout=timedelta(minutes=30),
+        execution_timeout=timedelta(minutes=45),
     )
 
     # ----------------------------------------------------------
@@ -88,11 +106,29 @@ with DAG(
     # ----------------------------------------------------------
     scan_signals_task = BashOperator(
         task_id="scan_signals",
-        bash_command="cd /opt/airflow && python -m src.signals.generator",
-        env={
-            "CASSANDRA_HOST": "{{ var.value.get('cassandra_host', 'cassandra') }}",
-            "CASSANDRA_PORT": "{{ var.value.get('cassandra_port', '9042') }}",
-        },
+        bash_command="""
+            echo "[*] Mengirim trigger ke Windows Host untuk menjalankan Scan Signals (bypassing IPv6 Docker limit)..."
+            touch /opt/airflow/DATA/trigger_scan.txt
+            
+            echo "[*] Menunggu proses Scan Signals selesai di host..."
+            while [ -f /opt/airflow/DATA/trigger_scan.txt ]; do
+                sleep 5
+            done
+            
+            if [ -f /opt/airflow/DATA/train_success.txt ]; then
+                echo "[+] Scan signals sukses!"
+                rm /opt/airflow/DATA/train_success.txt
+                exit 0
+            elif [ -f /opt/airflow/DATA/train_failed.txt ]; then
+                echo "[-] Scan signals gagal!"
+                rm -f /opt/airflow/DATA/train_failed.txt
+                exit 1
+            else
+                echo "[-] Proses selesai tapi tidak ada sinyal sukses/gagal. Asumsikan error."
+                exit 1
+            fi
+        """,
+        execution_timeout=timedelta(minutes=15),
     )
 
     # ----------------------------------------------------------
